@@ -1,11 +1,14 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset, Dataset
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, roc_auc_score
-from typing import Dict, Any, Tuple, List, Optional
+from sklearn.model_selection import KFold
+from typing import Dict, Any, Tuple, List, Optional, Callable
 import os
 from tqdm import tqdm
+from copy import deepcopy
+import time
 
 class EarlyStopping:
     """
@@ -238,4 +241,134 @@ def train_model(model: nn.Module,
     # Загружаем лучшую модель
     model.load_state_dict(torch.load(os.path.join(model_save_path, model_name)))
     
-    return model, history 
+    return model, history
+
+def train_with_kfold(dataset: Dataset,
+                    model_factory: Callable[[], nn.Module],
+                    optimizer_factory: Callable[[nn.Module], torch.optim.Optimizer],
+                    criterion: nn.Module,
+                    device: torch.device,
+                    n_splits: int = 5,
+                    num_epochs: int = 10,
+                    patience: int = 5,
+                    batch_size: int = 32,
+                    model_save_path: str = 'models',
+                    base_model_name: str = 'depression_model') -> Tuple[nn.Module, List[Dict[str, float]]]:
+    """
+    Обучение модели с использованием K-fold перекрестной валидации
+    
+    Args:
+        dataset: полный набор данных
+        model_factory: функция для создания модели
+        optimizer_factory: функция для создания оптимизатора
+        criterion: функция потерь
+        device: устройство
+        n_splits: количество разбиений (складок)
+        num_epochs: количество эпох
+        patience: количество эпох без улучшения до остановки
+        batch_size: размер батча
+        model_save_path: путь для сохранения моделей
+        base_model_name: базовое имя файлов моделей
+        
+    Returns:
+        Tuple: финальная модель и история обучения
+    """
+    # Создаем директорию для сохранения модели, если еще не существует
+    os.makedirs(model_save_path, exist_ok=True)
+    
+    # Создаем разбиения
+    kfold = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+    
+    # Инициализируем метрики для каждой складки
+    fold_metrics = []
+    fold_models = []
+    
+    # Получаем все индексы
+    indices = np.arange(len(dataset))
+    
+    # Обучаем модель на каждой складке
+    for fold, (train_idx, val_idx) in enumerate(kfold.split(indices)):
+        print(f"\n{'='*20} Fold {fold+1}/{n_splits} {'='*20}")
+        
+        # Создаем загрузчики данных для текущей складки
+        train_loader = DataLoader(
+            Subset(dataset, train_idx),
+            batch_size=batch_size,
+            shuffle=True
+        )
+        
+        val_loader = DataLoader(
+            Subset(dataset, val_idx),
+            batch_size=batch_size,
+            shuffle=False
+        )
+        
+        # Создаем модель и оптимизатор
+        model = model_factory().to(device)
+        optimizer = optimizer_factory(model)
+        
+        # Обучаем модель
+        model_name = f"{base_model_name}_fold{fold+1}.pt"
+        model, history = train_model(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            device=device,
+            num_epochs=num_epochs,
+            patience=patience,
+            model_save_path=model_save_path,
+            model_name=model_name
+        )
+        
+        # Сохраняем метрики и модель
+        final_metrics = history[-1]
+        fold_metrics.append(final_metrics)
+        fold_models.append(model.state_dict())
+        
+        print(f"\nFold {fold+1} Results:")
+        print(f"  F1: {final_metrics['f1']:.4f}")
+        print(f"  Accuracy: {final_metrics['accuracy']:.4f}")
+        print(f"  Precision: {final_metrics['precision']:.4f}")
+        print(f"  Recall: {final_metrics['recall']:.4f}")
+        print(f"  AUC: {final_metrics['auc']:.4f}")
+    
+    # Вычисляем средние метрики
+    avg_metrics = {}
+    for metric in ['f1', 'accuracy', 'precision', 'recall', 'auc', 'loss']:
+        avg_metrics[metric] = np.mean([m[metric] for m in fold_metrics])
+    
+    # Выводим средние метрики
+    print("\n" + "="*50)
+    print("Average Metrics Across All Folds:")
+    print(f"  F1: {avg_metrics['f1']:.4f}")
+    print(f"  Accuracy: {avg_metrics['accuracy']:.4f}")
+    print(f"  Precision: {avg_metrics['precision']:.4f}")
+    print(f"  Recall: {avg_metrics['recall']:.4f}")
+    print(f"  AUC: {avg_metrics['auc']:.4f}")
+    print("="*50)
+    
+    # Создаем финальную модель
+    final_model = model_factory().to(device)
+    
+    # Загружаем лучшую модель (с самым высоким F1)
+    best_fold_idx = np.argmax([m['f1'] for m in fold_metrics])
+    best_model_path = os.path.join(model_save_path, f"{base_model_name}_fold{best_fold_idx+1}.pt")
+    
+    print(f"\nLoading best model from fold {best_fold_idx+1}")
+    final_model.load_state_dict(torch.load(best_model_path))
+    
+    # Сохраняем ансамбль моделей
+    ensemble_path = os.path.join(model_save_path, f"{base_model_name}_ensemble.pt")
+    torch.save({
+        'fold_models': fold_models,
+        'best_model': final_model.state_dict(),
+        'fold_metrics': fold_metrics,
+        'avg_metrics': avg_metrics
+    }, ensemble_path)
+    
+    print(f"Saved ensemble model to {ensemble_path}")
+    
+    # Возвращаем финальную модель и метрики
+    return final_model, fold_metrics 

@@ -4,14 +4,16 @@
 
 ## Структура модуля
 
-- **preprocessing.py** - содержит функции для предобработки текстовых данных (очистка, лемматизация)
+- **preprocessing.py** - содержит функции для предобработки текстовых данных (очистка, лемматизация, обработка выбросов, аугментация текста)
 - **dataset.py** - определяет класс датасета и функции для подготовки данных
-- **model.py** - архитектура модели (BiLSTM с механизмом внимания)
+- **model.py** - архитектура модели (BiLSTM с механизмом внимания, слоями нормализации и возможностью использовать многослойную LSTM)
 - **balancing.py** - функции для балансировки данных (особенно для несбалансированных классов)
-- **training.py** - функции для обучения и оценки модели
+- **training.py** - функции для обучения и оценки модели, включая K-fold валидацию
 - **prediction.py** - класс для получения предсказаний с использованием обученной модели
 - **train.py** - скрипт для запуска обучения модели
 - **predict.py** - скрипт для получения предсказаний
+- **visualization.py** - визуализация результатов обучения и предсказаний
+- **visualize_data.py** - анализ исходных данных и визуализация распределений
 
 ## Предварительные требования
 
@@ -39,6 +41,12 @@ gzip -d cc.ru.300.bin.gz
 python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin --model_dir models --model_name depression_model.pt --epochs 20 --batch_size 32 --balance_method random_oversample
 ```
 
+Для использования всех улучшений:
+
+```bash
+python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin --epochs 20 --handle_outliers --augment_positive --use_kfold --n_splits 5 --lstm_layers 2 --dropout 0.5
+```
+
 ### Параметры для обучения
 
 - `--data_path` - путь к файлу с данными
@@ -55,6 +63,11 @@ python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin -
 - `--balance_method` - метод балансировки данных (`none`, `random_oversample`, `random_undersample`, `smote`)
 - `--max_len` - максимальная длина последовательности
 - `--output_dir` - директория для результатов
+- `--lstm_layers` - количество слоёв LSTM
+- `--use_kfold` - использовать K-fold валидацию
+- `--n_splits` - количество разбиений для K-fold валидации
+- `--handle_outliers` - обрабатывать выбросы в метаданных
+- `--augment_positive` - аугментировать положительные примеры
 
 ## Получение предсказаний
 
