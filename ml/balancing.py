@@ -42,7 +42,10 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
             X_res, y_res = sampler.fit_resample(meta_features, labels)
             # Восстанавливаем тексты по индексам
             texts_res = [texts[i[0]] for i in X_res_indices]
-            return texts_res, X_res, y_res.tolist()
+            # Проверяем тип y_res и преобразуем в список если нужно
+            if isinstance(y_res, np.ndarray):
+                y_res = y_res.tolist()
+            return texts_res, X_res, y_res
         except:
             print("Ошибка при выполнении SMOTE, используем RandomOverSampler")
             sampler = RandomOverSampler(random_state=random_state)
@@ -56,7 +59,11 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
     # Восстанавливаем meta_features по индексам
     meta_features_res = np.array([meta_features[i[0]] for i in X_res_indices])
     
-    return texts_res, meta_features_res, y_res.tolist()
+    # Проверяем тип y_res и преобразуем в список если нужно
+    if isinstance(y_res, np.ndarray):
+        y_res = y_res.tolist()
+    
+    return texts_res, meta_features_res, y_res
 
 def get_class_weights(labels: List[int]) -> Dict[int, float]:
     """

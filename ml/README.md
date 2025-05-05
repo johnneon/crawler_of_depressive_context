@@ -8,7 +8,7 @@
 - **dataset.py** - определяет класс датасета и функции для подготовки данных
 - **model.py** - архитектура модели (BiLSTM с механизмом внимания, слоями нормализации и возможностью использовать многослойную LSTM)
 - **balancing.py** - функции для балансировки данных (особенно для несбалансированных классов)
-- **training.py** - функции для обучения и оценки модели, включая K-fold валидацию
+- **training.py** - функции для обучения и оценки модели
 - **prediction.py** - класс для получения предсказаний с использованием обученной модели
 - **train.py** - скрипт для запуска обучения модели
 - **predict.py** - скрипт для получения предсказаний
@@ -44,7 +44,7 @@ python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin -
 Для использования всех улучшений:
 
 ```bash
-python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin --epochs 20 --handle_outliers --augment_positive --use_kfold --n_splits 5 --lstm_layers 2 --dropout 0.5
+python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin --epochs 20 --handle_outliers --augment_positive --lstm_layers 2 --dropout 0.5
 ```
 
 ### Параметры для обучения
@@ -64,8 +64,6 @@ python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin -
 - `--max_len` - максимальная длина последовательности
 - `--output_dir` - директория для результатов
 - `--lstm_layers` - количество слоёв LSTM
-- `--use_kfold` - использовать K-fold валидацию
-- `--n_splits` - количество разбиений для K-fold валидации
 - `--handle_outliers` - обрабатывать выбросы в метаданных
 - `--augment_positive` - аугментировать положительные примеры
 

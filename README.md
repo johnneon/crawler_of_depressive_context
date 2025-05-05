@@ -9,7 +9,7 @@
   - **dataset.py** - класс для работы с данными
   - **model.py** - улучшенная архитектура модели с механизмом внимания и многослойной LSTM
   - **balancing.py** - методы балансировки выборок
-  - **training.py** - функции для обучения и оценки модели, включая K-fold валидацию
+  - **training.py** - функции для обучения и оценки модели
   - **prediction.py** - класс для получения предсказаний
   - **train.py** - скрипт для обучения модели
   - **predict.py** - скрипт для получения предсказаний
@@ -61,11 +61,6 @@ python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin -
 Обучение с обработкой выбросов и аугментацией данных:
 ```bash
 python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin --epochs 20 --balance_method random_oversample --handle_outliers --augment_positive
-```
-
-Обучение с K-fold валидацией:
-```bash
-python -m ml.train --data_path dataset/data.json --fasttext_path cc.ru.300.bin --epochs 20 --balance_method random_oversample --use_kfold --n_splits 5
 ```
 
 ### Получение предсказаний
