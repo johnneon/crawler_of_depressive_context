@@ -1,0 +1,93 @@
+{
+    "args": {
+        "data_path": "dataset/data.json",
+        "fasttext_path": "cc.ru.300.bin",
+        "model_dir": "models",
+        "model_name": "depression_model.pt",
+        "epochs": 20,
+        "batch_size": 32,
+        "hidden_dim": 128,
+        "dropout": 0.5,
+        "learning_rate": 0.001,
+        "patience": 5,
+        "test_size": 0.2,
+        "balance_method": "random_undersample",
+        "max_len": 500,
+        "use_scheduler": false,
+        "output_dir": "results",
+        "lstm_layers": 1,
+        "handle_outliers": false,
+        "augment_positive": false
+    },
+    "final_metrics": {
+        "loss": 3.5792578372209434,
+        "accuracy": 0.015422219635686435,
+        "precision": 0.015422219635686435,
+        "recall": 1.0,
+        "f1": 0.030375974323704723,
+        "auc": 0.8792516399859923
+    },
+    "history": [
+        {
+            "epoch": 1,
+            "train_loss": 2.783297396417874,
+            "loss": 3.5792578372209434,
+            "accuracy": 0.015422219635686435,
+            "precision": 0.015422219635686435,
+            "recall": 1.0,
+            "f1": 0.030375974323704723,
+            "auc": 0.8792516399859923
+        },
+        {
+            "epoch": 2,
+            "train_loss": 2.2234246606257426,
+            "loss": 3.3826432729788554,
+            "accuracy": 0.015422219635686435,
+            "precision": 0.015422219635686435,
+            "recall": 1.0,
+            "f1": 0.030375974323704723,
+            "auc": 0.8919395887376848
+        },
+        {
+            "epoch": 3,
+            "train_loss": 2.049543750819875,
+            "loss": 3.358624100907111,
+            "accuracy": 0.015422219635686435,
+            "precision": 0.015422219635686435,
+            "recall": 1.0,
+            "f1": 0.030375974323704723,
+            "auc": 0.8976371041672708
+        },
+        {
+            "epoch": 4,
+            "train_loss": 2.023488651460676,
+            "loss": 3.5417682138901183,
+            "accuracy": 0.015422219635686435,
+            "precision": 0.015422219635686435,
+            "recall": 1.0,
+            "f1": 0.030375974323704723,
+            "auc": 0.9030396340171347
+        },
+        {
+            "epoch": 5,
+            "train_loss": 1.9533036769326053,
+            "loss": 3.0198556435618764,
+            "accuracy": 0.015422219635686435,
+            "precision": 0.015422219635686435,
+            "recall": 1.0,
+            "f1": 0.030375974323704723,
+            "auc": 0.9106135700058217
+        },
+        {
+            "epoch": 6,
+            "train_loss": 1.9604197420291047,
+            "loss": 2.7308009660887764,
+            "accuracy": 0.015422219635686435,
+            "precision": 0.015422219635686435,
+            "recall": 1.0,
+            "f1": 0.030375974323704723,
+            "auc": 0.9117857055229777
+        }
+    ],
+    "training_time": "0:31:57.972095"
+}

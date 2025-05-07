@@ -5,7 +5,7 @@ from typing import List, Tuple, Dict, Any, Optional
 
 def balance_dataset(texts: List[str], meta_features: np.ndarray, 
                     labels: List[int], 
-                    method: str = 'random_oversample',
+                    method: str = 'none',
                     random_state: int = 42) -> Tuple[List[str], np.ndarray, List[int]]:
     """
     Балансировка датасета с использованием различных методов
@@ -22,7 +22,6 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
     """
     # Преобразуем тексты в индексы
     text_indices = np.arange(len(texts)).reshape(-1, 1)
-    
     if method == 'none':
         return texts, meta_features, labels
     
