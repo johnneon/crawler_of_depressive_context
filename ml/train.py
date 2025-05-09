@@ -2,12 +2,11 @@ import os
 import json
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader
 import fasttext
 import argparse
-from typing import List, Dict, Any
+from typing import List, Dict
 import matplotlib.pyplot as plt
-import numpy as np
 from datetime import datetime
 
 from ml.preprocessing import preprocess_user, preprocess_batch
@@ -15,6 +14,7 @@ from ml.dataset import DepressionDataset, prepare_data
 from ml.model import BiLSTMWithAttention, get_pos_weight
 from ml.training import train_model, evaluate
 from ml.balancing import balance_dataset
+from ml.visualization import plot_wordcloud_comparison, plot_top_words, visualize_results_from_file
 
 def parse_args():
     """
@@ -40,24 +40,35 @@ def parse_args():
                         help='Вероятность дропаута')
     parser.add_argument('--learning_rate', type=float, default=1e-3,
                         help='Скорость обучения')
-    parser.add_argument('--patience', type=int, default=5,
+    parser.add_argument('--patience', type=int, default=3,
                         help='Количество эпох без улучшения до остановки')
     parser.add_argument('--test_size', type=float, default=0.2,
                         help='Доля данных для валидации')
-    parser.add_argument('--balance_method', type=str, choices=['none', 'random_oversample', 'random_undersample', 'smote'],
-                        default='random_oversample', help='Метод балансировки данных')
+    parser.add_argument('--balance_method', type=str, 
+                        choices=['none', 'random_oversample', 'random_undersample', 
+                                'smote', 'adasyn', 'partial_smote', 'partial_adasyn'],
+                        default='partial_smote', 
+                        help='Метод балансировки данных')
+    parser.add_argument('--imbalance_ratio', type=float, default=0.333,
+                        help='Целевое соотношение между позитивным и негативным классами (1:3 = 0.333)')
     parser.add_argument('--max_len', type=int, default=500,
                         help='Максимальная длина последовательности')
-    parser.add_argument('--use_scheduler', action='store_true',
+    parser.add_argument('--use_scheduler', action='store_true', default=True,
                         help='Использовать планировщик скорости обучения')
     parser.add_argument('--output_dir', type=str, default='results',
                         help='Директория для результатов')
-    parser.add_argument('--lstm_layers', type=int, default=1,
+    parser.add_argument('--visualize_dir', type=str, default='visualizations',
+                        help='Директория для визуализаций')
+    parser.add_argument('--lstm_layers', type=int, default=2,
                         help='Количество слоёв LSTM')
-    parser.add_argument('--handle_outliers', action='store_true',
+    parser.add_argument('--handle_outliers', action='store_true', default=True,
                         help='Обрабатывать выбросы в метаданных')
-    parser.add_argument('--augment_positive', action='store_true',
+    parser.add_argument('--augment_positive', action='store_true', default=True,
                         help='Аугментировать положительные примеры')
+    parser.add_argument('--clip_grad_value', type=float, default=1.0,
+                        help='Значение для ограничения градиентов')
+    parser.add_argument('--generate_wordclouds', action='store_true', default=True,
+                        help='Генерировать облака слов для анализа')
     
     return parser.parse_args()
 
@@ -71,7 +82,6 @@ def plot_metrics(history: List[Dict[str, float]], output_dir: str):
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Построение графика потерь
     plt.figure(figsize=(10, 6))
     plt.plot([x['epoch'] for x in history], [x['train_loss'] for x in history], label='Train Loss')
     plt.plot([x['epoch'] for x in history], [x['loss'] for x in history], label='Val Loss')
@@ -81,7 +91,6 @@ def plot_metrics(history: List[Dict[str, float]], output_dir: str):
     plt.legend()
     plt.savefig(os.path.join(output_dir, 'loss.png'))
     
-    # Построение графика точности
     plt.figure(figsize=(10, 6))
     plt.plot([x['epoch'] for x in history], [x['accuracy'] for x in history], label='Accuracy')
     plt.plot([x['epoch'] for x in history], [x['precision'] for x in history], label='Precision')
@@ -98,6 +107,7 @@ def main():
     
     os.makedirs(args.model_dir, exist_ok=True)
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.visualize_dir, exist_ok=True)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Используется устройство: {device}")
@@ -129,27 +139,44 @@ def main():
     neg_count = len(labels) - pos_count
     print(f"Распределение классов: Позитивные - {pos_count}, Негативные - {neg_count}")
     
+    if args.generate_wordclouds:
+        print("Генерация облаков слов для анализа исходных данных...")
+        plot_wordcloud_comparison(
+            texts=texts,
+            labels=labels,
+            save_dir=os.path.join(args.visualize_dir, 'wordclouds')
+        )
+        
+        plot_top_words(
+            texts=texts,
+            labels=labels,
+            top_n=20,
+            save_dir=os.path.join(args.visualize_dir, 'top_words')
+        )
+    
     print(f"Загрузка модели FastText из {args.fasttext_path}...")
     ft = fasttext.load_model(args.fasttext_path)
     
-    # Стандартное обучение без K-fold
-    # Подготовка данных
     texts_train, texts_val, metas_train, metas_val, labels_train, labels_val = prepare_data(
         texts, meta_features, labels, test_size=args.test_size
     )
     
-    # Балансировка обучающих данных
     if args.balance_method != 'none':
         print(f"Балансировка данных с использованием метода: {args.balance_method}...")
+        if args.balance_method.startswith('partial_'):
+            print(f"Использование частичной балансировки с соотношением: {args.imbalance_ratio} (~ 1:{1/args.imbalance_ratio:.1f})")
+            
         texts_train, metas_train, labels_train = balance_dataset(
-            texts_train, metas_train, labels_train, method=args.balance_method
+            texts_train, metas_train, labels_train, 
+            method=args.balance_method,
+            imbalance_ratio=args.imbalance_ratio
         )
         print(f"После балансировки: {len(texts_train)} примеров")
         pos_count = sum(labels_train)
         neg_count = len(labels_train) - pos_count
         print(f"Новое распределение классов: Позитивные - {pos_count}, Негативные - {neg_count}")
+        print(f"Соотношение позитивных к негативным: 1:{neg_count/pos_count:.2f}")
     
-    # Создание датасетов
     print("Создание датасетов...")
     train_dataset = DepressionDataset(
         texts_train, metas_train, labels_train, ft_model=ft, max_len=args.max_len
@@ -158,11 +185,9 @@ def main():
         texts_val, metas_val, labels_val, ft_model=ft, max_len=args.max_len
     )
     
-    # Создание загрузчиков данных
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
     
-    # Создание модели
     print("Создание модели...")
     embedding_dim = 300  # размерность FastText
     meta_dim = len(meta_features[0]) if meta_features else 6
@@ -175,14 +200,11 @@ def main():
         lstm_layers=args.lstm_layers
     ).to(device)
     
-    # Оптимизатор
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     
-    # Веса классов
     pos_weight, _ = get_pos_weight(labels)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     
-    # Обучение модели
     print("Начало обучения...")
     start_time = datetime.now()
     
@@ -196,14 +218,15 @@ def main():
         num_epochs=args.epochs,
         patience=args.patience,
         model_save_path=args.model_dir,
-        model_name=args.model_name
+        model_name=args.model_name,
+        use_scheduler=args.use_scheduler,
+        clip_grad_value=args.clip_grad_value
     )
     
     end_time = datetime.now()
     training_time = end_time - start_time
     print(f"Обучение завершено за {training_time}")
     
-    # Оценка финальной модели
     print("Оценка модели на валидационных данных...")
     val_metrics = evaluate(model, val_loader, criterion, device)
     
@@ -215,16 +238,18 @@ def main():
     print(f"  F1: {val_metrics['f1']:.4f}")
     print(f"  AUC: {val_metrics['auc']:.4f}")
     
-    # Построение графиков
     print("Построение графиков метрик...")
     plot_metrics(history, args.output_dir)
     
-    # Сохранение метрик
     results = {
         'args': vars(args),
         'final_metrics': val_metrics,
         'history': history,
-        'training_time': str(training_time)
+        'training_time': str(training_time),
+        'class_distribution': {
+            'original': {'positive': sum(labels), 'negative': len(labels) - sum(labels)},
+            'train_after_balance': {'positive': sum(labels_train), 'negative': len(labels_train) - sum(labels_train)}
+        }
     }
     
     with open(os.path.join(args.output_dir, 'results.json'), 'w', encoding='utf-8') as f:
@@ -232,6 +257,13 @@ def main():
     
     print(f"Результаты сохранены в {os.path.join(args.output_dir, 'results.json')}")
     print(f"Модель сохранена в {os.path.join(args.model_dir, args.model_name)}")
+    
+    print("Создание визуализаций результатов...")
+    visualize_results_from_file(
+        results_file=os.path.join(args.output_dir, 'results.json'),
+        output_dir=args.visualize_dir
+    )
 
 if __name__ == "__main__":
     main() 
+    

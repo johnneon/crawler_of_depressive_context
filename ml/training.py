@@ -1,17 +1,15 @@
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, Subset, Dataset
-import numpy as np
+from torch.utils.data import DataLoader
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score, roc_auc_score
-from typing import Dict, Any, Tuple, List, Optional, Callable
+from typing import Dict, Tuple, List
 import os
 from tqdm import tqdm
 from copy import deepcopy
-import time
 
 class EarlyStopping:
 
-    def __init__(self, patience: int = 5, min_delta: float = 0, mode: str = 'min'):
+    def __init__(self, patience: int = 3, min_delta: float = 0, mode: str = 'min'):
         """
         Инициализация
         
@@ -63,7 +61,8 @@ def train_epoch(model: nn.Module,
                 dataloader: DataLoader, 
                 optimizer: torch.optim.Optimizer, 
                 criterion: nn.Module, 
-                device: torch.device) -> float:
+                device: torch.device,
+                clip_grad_value: float = 1.0) -> float:
     """
     Обучение модели на одной эпохе
     
@@ -73,6 +72,7 @@ def train_epoch(model: nn.Module,
         optimizer: оптимизатор
         criterion: функция потерь
         device: устройство (CPU/GPU)
+        clip_grad_value: значение для ограничения градиентов
         
     Returns:
         float: средняя потеря за эпоху
@@ -89,6 +89,10 @@ def train_epoch(model: nn.Module,
         logits = model(text, meta)
         loss = criterion(logits, labels)
         loss.backward()
+        
+        # градиентный клиппинг для предотвращения взрыва градиентов
+        torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad_value)
+        
         optimizer.step()
         total_loss += loss.item()
     
@@ -162,9 +166,11 @@ def train_model(model: nn.Module,
                 criterion: nn.Module, 
                 device: torch.device,
                 num_epochs: int = 10,
-                patience: int = 5,
+                patience: int = 3,
                 model_save_path: str = 'models',
-                model_name: str = 'depression_model.pt') -> Tuple[nn.Module, List[Dict[str, float]]]:
+                model_name: str = 'depression_model.pt',
+                use_scheduler: bool = True,
+                clip_grad_value: float = 1.0) -> Tuple[nn.Module, List[Dict[str, float]]]:
     """
     Полный цикл обучения модели
     
@@ -179,6 +185,8 @@ def train_model(model: nn.Module,
         patience: количество эпох без улучшения до остановки
         model_save_path: путь для сохранения модели
         model_name: имя файла модели
+        use_scheduler: использовать ли планировщик скорости обучения
+        clip_grad_value: значение для ограничения градиентов
         
     Returns:
         Tuple: обученная модель и история обучения
@@ -187,15 +195,20 @@ def train_model(model: nn.Module,
     
     early_stopping = EarlyStopping(patience=patience, mode='max')
     
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=2
-    )
+    # настройка планировщика скорости обучения
+    if use_scheduler:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=0.5, patience=2, min_lr=1e-6
+        )
+    else:
+        scheduler = None
     
     history = []
     best_f1 = 0.0
+    best_model_state = None
     
     for epoch in range(num_epochs):
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device, clip_grad_value)
         
         val_metrics = evaluate(model, val_loader, criterion, device)
         
@@ -212,18 +225,23 @@ def train_model(model: nn.Module,
         print(f"  Precision: {val_metrics['precision']:.4f}, Recall: {val_metrics['recall']:.4f}")
         print(f"  F1: {val_metrics['f1']:.4f}, AUC: {val_metrics['auc']:.4f}")
         
+        # обновление планировщика скорости обучения
+        if scheduler:
+            scheduler.step(val_metrics['f1'])
+            for param_group in optimizer.param_groups:
+                print(f"  Текущая скорость обучения: {param_group['lr']:.6f}")
+        
         if val_metrics['f1'] > best_f1:
             best_f1 = val_metrics['f1']
+            best_model_state = deepcopy(model.state_dict())
             torch.save(model.state_dict(), os.path.join(model_save_path, model_name))
-            print(f"  Saved best model with F1: {best_f1:.4f}")
-        
-        scheduler.step(val_metrics['f1'])
+            print(f"  Сохранена лучшая модель с F1: {best_f1:.4f}")
         
         if early_stopping(val_metrics['f1']):
-            print(f"Early stopping at epoch {epoch+1}")
+            print(f"Раннее прекращение (Early stopping) на эпохе {epoch+1}")
             break
     
-    # Загружаем лучшую модель
-    model.load_state_dict(torch.load(os.path.join(model_save_path, model_name)))
+    if best_model_state:
+        model.load_state_dict(best_model_state)
     
     return model, history 

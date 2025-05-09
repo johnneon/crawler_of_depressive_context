@@ -1,11 +1,12 @@
 import numpy as np
-from imblearn.over_sampling import SMOTE, RandomOverSampler
+from imblearn.over_sampling import SMOTE, RandomOverSampler, ADASYN
 from imblearn.under_sampling import RandomUnderSampler
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict
 
 def balance_dataset(texts: List[str], meta_features: np.ndarray, 
                     labels: List[int], 
                     method: str = 'none',
+                    imbalance_ratio: float = 0.333,  # 1:3 соотношение
                     random_state: int = 42) -> Tuple[List[str], np.ndarray, List[int]]:
     """
     Балансировка датасета с использованием различных методов
@@ -14,7 +15,8 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
         texts: список текстов
         meta_features: массив метаданных
         labels: список меток
-        method: метод балансировки ('random_oversample', 'random_undersample', 'smote' или 'none')
+        method: метод балансировки ('random_oversample', 'random_undersample', 'smote', 'adasyn', 'partial_smote', 'partial_adasyn' или 'none')
+        imbalance_ratio: для частичной балансировки, целевое соотношение между позитивным и негативным классами (например, 0.333 соответствует соотношению 1:3)
         random_state: случайное состояние для воспроизводимости
         
     Returns:
@@ -25,7 +27,54 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
     if method == 'none':
         return texts, meta_features, labels
     
-    # Выбор метода балансировки
+    # Подсчет количества экземпляров каждого класса
+    num_positive = sum(labels)
+    num_negative = len(labels) - num_positive
+    
+    # Для частичной балансировки
+    if method.startswith('partial_'):
+        # Желаемое соотношение между позитивным и негативным классами (например, 1:3)
+        base_method = method.replace('partial_', '')
+        
+        # Рассчитываем целевое количество положительных примеров для поддержания дисбаланса
+        target_positive = int(num_negative * imbalance_ratio)
+        
+        # Если уже больше, не нужно балансировать
+        if num_positive >= target_positive:
+            return texts, meta_features, labels
+        
+        # Устанавливаем количество для SMOTE или ADASYN
+        sampling_strategy = {1: target_positive}
+        
+        if base_method == 'smote':
+            try:
+                sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=random_state)
+                X_res, y_res = sampler.fit_resample(meta_features, labels)
+                
+                # Восстанавливаем тексты
+                X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
+                texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
+                
+                return texts_res, X_res, y_res.tolist()
+            except Exception as e:
+                print(f"Ошибка при выполнении частичного SMOTE: {e}")
+                return texts, meta_features, labels
+                
+        elif base_method == 'adasyn':
+            try:
+                sampler = ADASYN(sampling_strategy=sampling_strategy, random_state=random_state)
+                X_res, y_res = sampler.fit_resample(meta_features, labels)
+                
+                # Восстанавливаем тексты
+                X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
+                texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
+                
+                return texts_res, X_res, y_res.tolist()
+            except Exception as e:
+                print(f"Ошибка при выполнении частичного ADASYN: {e}")
+                return texts, meta_features, labels
+                
+    # Полная балансировка с различными методами
     if method == 'random_oversample':
         sampler = RandomOverSampler(random_state=random_state)
         X_res_indices, y_res = sampler.fit_resample(text_indices, labels)
@@ -36,17 +85,36 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
         # Для SMOTE нужны численные признаки, поэтому используем meta_features
         if meta_features.shape[1] == 0:
             raise ValueError("SMOTE требует численных признаков (meta_features)")
-        sampler = SMOTE(random_state=random_state)
+        
         try:
+            sampler = SMOTE(random_state=random_state)
             X_res, y_res = sampler.fit_resample(meta_features, labels)
-            # Восстанавливаем тексты по индексам
-            texts_res = [texts[i[0]] for i in X_res_indices]
-            # Проверяем тип y_res и преобразуем в список если нужно
-            if isinstance(y_res, np.ndarray):
-                y_res = y_res.tolist()
-            return texts_res, X_res, y_res
-        except:
-            print("Ошибка при выполнении SMOTE, используем RandomOverSampler")
+            
+            # Восстанавливаем тексты
+            X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
+            texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
+            
+            return texts_res, X_res, y_res.tolist()
+        except Exception as e:
+            print(f"Ошибка при выполнении SMOTE: {e}, используем RandomOverSampler")
+            sampler = RandomOverSampler(random_state=random_state)
+            X_res_indices, y_res = sampler.fit_resample(text_indices, labels)
+    elif method == 'adasyn':
+        # Для ADASYN также нужны численные признаки
+        if meta_features.shape[1] == 0:
+            raise ValueError("ADASYN требует численных признаков (meta_features)")
+        
+        try:
+            sampler = ADASYN(random_state=random_state)
+            X_res, y_res = sampler.fit_resample(meta_features, labels)
+            
+            # Восстанавливаем тексты
+            X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
+            texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
+            
+            return texts_res, X_res, y_res.tolist()
+        except Exception as e:
+            print(f"Ошибка при выполнении ADASYN: {e}, используем RandomOverSampler")
             sampler = RandomOverSampler(random_state=random_state)
             X_res_indices, y_res = sampler.fit_resample(text_indices, labels)
     else:

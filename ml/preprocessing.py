@@ -2,8 +2,30 @@ import re
 from pymorphy3 import MorphAnalyzer
 import numpy as np
 from typing import Dict, List, Any, Union, Tuple
+import nltk
+from nltk.corpus import stopwords
+
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
 
 morph = MorphAnalyzer()
+
+# Получаем стандартные стоп-слова для русского языка
+STOPWORDS = set(stopwords.words('russian'))
+
+# Добавляем специфические стоп-слова для соцсетей
+SOCIAL_STOPWORDS = {
+    'привет', 'пока', 'доброе', 'утро', 'день', 'вечер', 'ночь',
+    'http', 'https', 'www', 'com', 'ru', 'фото', 'видео',
+    'лайк', 'репост', 'ретвит', 'подписка', 'подписаться', 'отписаться',
+    'rt', 'vk', 'ok', 'instagram', 'facebook', 'twitter', 'telegram',
+    'спасибо', 'пожалуйста', 'всем', 'хорошего', 'отличного'
+}
+
+# Объединяем стандартные и специфические стоп-слова
+ALL_STOPWORDS = STOPWORDS.union(SOCIAL_STOPWORDS)
 
 def clean_text(text: str) -> str:
     """
@@ -11,9 +33,19 @@ def clean_text(text: str) -> str:
     """
     text = re.sub(r'<.*?>', '', text)
     text = re.sub(r'http\S+|www\S+', '', text)
+    text = re.sub(r'@\w+', '', text)  # удаление упоминаний (@username)
+    text = re.sub(r'#\w+', '', text)  # удаление хештегов (#topic)
     text = text.lower()
     text = re.sub(r'\s+', ' ', text).strip()
     return text
+
+def remove_stopwords(text: str) -> str:
+    """
+    Удаление стоп-слов из текста
+    """
+    words = text.split()
+    filtered_words = [word for word in words if word not in ALL_STOPWORDS]
+    return ' '.join(filtered_words)
 
 def lemmatize(text: str) -> str:
     """
@@ -23,7 +55,7 @@ def lemmatize(text: str) -> str:
 
 def handle_outliers(meta_features: List[Dict[str, Union[int, float]]]) -> List[Dict[str, Union[int, float]]]:
     """
-    Обработка выбросов в метаданных
+    Обработка выбросов в метаданных - заменяет выбросы на медианные значения
     
     Args:
         meta_features: список словарей с метаданными пользователей
@@ -31,16 +63,13 @@ def handle_outliers(meta_features: List[Dict[str, Union[int, float]]]) -> List[D
     Returns:
         List[Dict]: список обработанных метаданных
     """
-    # Создаем копию метаданных
     processed_meta = []
     
-    # Получаем имена числовых полей
     numeric_fields = []
     for field in meta_features[0].keys():
         if isinstance(meta_features[0][field], (int, float)):
             numeric_fields.append(field)
     
-    # Вычисляем статистики для каждого поля
     stats = {}
     for field in numeric_fields:
         values = [user[field] for user in meta_features]
@@ -57,13 +86,10 @@ def handle_outliers(meta_features: List[Dict[str, Union[int, float]]]) -> List[D
             'median': median
         }
     
-    # Обработка каждого пользователя
     for user in meta_features:
         processed_user = user.copy()
         
-        # Обработка каждого поля
         for field in numeric_fields:
-            # Если значение является выбросом, заменяем его медианой
             if (user[field] < stats[field]['lower_bound'] or 
                 user[field] > stats[field]['upper_bound']):
                 processed_user[field] = stats[field]['median']
@@ -75,11 +101,12 @@ def handle_outliers(meta_features: List[Dict[str, Union[int, float]]]) -> List[D
 def preprocess_user(user: dict) -> dict:
     """
     Предобработка данных пользователя: объединение текстов постов, 
-    очистка и лемматизация текста
+    очистка, удаление стоп-слов и лемматизация текста
     """
     combined_text = ' '.join(post['text'] for post in user['posts'] if post['text'])
     cleaned_text = clean_text(combined_text)
-    lemmatized_text = lemmatize(cleaned_text)
+    filtered_text = remove_stopwords(cleaned_text)
+    lemmatized_text = lemmatize(filtered_text)
     
     return {
         "label": user["label"],
@@ -108,17 +135,16 @@ def augment_text(text: str, augmentation_ratio: float = 0.1) -> List[str]:
     words = text.split()
     augmented_texts = []
     
+    # не аугментируем слишком короткие тексты
     if len(words) <= 3:
-        return [text]  # Не аугментируем слишком короткие тексты
+        return [text]
     
-    # 1. Удаление случайных слов
     num_to_remove = max(1, int(len(words) * augmentation_ratio))
     for _ in range(2):
         indices_to_remove = np.random.choice(len(words), num_to_remove, replace=False)
         new_words = [w for i, w in enumerate(words) if i not in indices_to_remove]
         augmented_texts.append(" ".join(new_words))
     
-    # 2. Перемешивание порядка некоторых слов
     num_to_shuffle = max(2, int(len(words) * augmentation_ratio))
     for _ in range(2):
         indices_to_shuffle = np.random.choice(len(words), num_to_shuffle, replace=False)
@@ -137,7 +163,7 @@ def preprocess_batch(users: List[Dict[str, Any]],
                     augment_positive: bool = True,
                     handle_meta_outliers: bool = True) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
-    Предобработка партии пользователей с дополнительными улучшениями
+    Предобработка партии пользователей
     
     Args:
         users: список словарей с данными пользователей
@@ -155,10 +181,8 @@ def preprocess_batch(users: List[Dict[str, Any]],
         'augmented_count': 0
     }
     
-    # Предобработка пользователей
     basic_processed = [preprocess_user(user) for user in users]
     
-    # Обработка выбросов в метаданных
     if handle_meta_outliers:
         meta_list = [user['meta'] for user in basic_processed]
         processed_meta = handle_outliers(meta_list)
@@ -166,13 +190,11 @@ def preprocess_batch(users: List[Dict[str, Any]],
         for i, user in enumerate(basic_processed):
             user['meta'] = processed_meta[i]
     
-    # Аугментация положительных примеров
     for user in basic_processed:
         if user['label'] == 1:
             stats['positive_count'] += 1
             processed_users.append(user)
             
-            # Аугментация текстов положительных примеров
             if augment_positive:
                 augmented_texts = augment_text(user['text'])
                 for aug_text in augmented_texts:
