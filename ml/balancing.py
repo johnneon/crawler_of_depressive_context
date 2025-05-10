@@ -22,28 +22,22 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
     Returns:
         Tuple: кортеж (тексты, метаданные, метки) после балансировки
     """
-    # Преобразуем тексты в индексы
     text_indices = np.arange(len(texts)).reshape(-1, 1)
     if method == 'none':
         return texts, meta_features, labels
     
-    # Подсчет количества экземпляров каждого класса
     num_positive = sum(labels)
     num_negative = len(labels) - num_positive
     
-    # Для частичной балансировки
     if method.startswith('partial_'):
-        # Желаемое соотношение между позитивным и негативным классами (например, 1:3)
         base_method = method.replace('partial_', '')
         
-        # Рассчитываем целевое количество положительных примеров для поддержания дисбаланса
         target_positive = int(num_negative * imbalance_ratio)
         
-        # Если уже больше, не нужно балансировать
+        # если уже больше, не нужно балансировать
         if num_positive >= target_positive:
             return texts, meta_features, labels
         
-        # Устанавливаем количество для SMOTE или ADASYN
         sampling_strategy = {1: target_positive}
         
         if base_method == 'smote':
@@ -51,7 +45,6 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
                 sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=random_state)
                 X_res, y_res = sampler.fit_resample(meta_features, labels)
                 
-                # Восстанавливаем тексты
                 X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
                 texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
                 
@@ -65,7 +58,6 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
                 sampler = ADASYN(sampling_strategy=sampling_strategy, random_state=random_state)
                 X_res, y_res = sampler.fit_resample(meta_features, labels)
                 
-                # Восстанавливаем тексты
                 X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
                 texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
                 
@@ -74,7 +66,6 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
                 print(f"Ошибка при выполнении частичного ADASYN: {e}")
                 return texts, meta_features, labels
                 
-    # Полная балансировка с различными методами
     if method == 'random_oversample':
         sampler = RandomOverSampler(random_state=random_state)
         X_res_indices, y_res = sampler.fit_resample(text_indices, labels)
@@ -82,7 +73,7 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
         sampler = RandomUnderSampler(random_state=random_state)
         X_res_indices, y_res = sampler.fit_resample(text_indices, labels)
     elif method == 'smote':
-        # Для SMOTE нужны численные признаки, поэтому используем meta_features
+        # для SMOTE нужны численные признаки, поэтому используем meta_features
         if meta_features.shape[1] == 0:
             raise ValueError("SMOTE требует численных признаков (meta_features)")
         
@@ -90,7 +81,6 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
             sampler = SMOTE(random_state=random_state)
             X_res, y_res = sampler.fit_resample(meta_features, labels)
             
-            # Восстанавливаем тексты
             X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
             texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
             
@@ -100,7 +90,7 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
             sampler = RandomOverSampler(random_state=random_state)
             X_res_indices, y_res = sampler.fit_resample(text_indices, labels)
     elif method == 'adasyn':
-        # Для ADASYN также нужны численные признаки
+        # для ADASYN также нужны численные признаки
         if meta_features.shape[1] == 0:
             raise ValueError("ADASYN требует численных признаков (meta_features)")
         
@@ -108,7 +98,6 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
             sampler = ADASYN(random_state=random_state)
             X_res, y_res = sampler.fit_resample(meta_features, labels)
             
-            # Восстанавливаем тексты
             X_res_indices, y_res_indices = sampler.fit_resample(text_indices, labels)
             texts_res = [texts[i[0]] if i[0] < len(texts) else "synthetic_example" for i in X_res_indices]
             
@@ -120,13 +109,11 @@ def balance_dataset(texts: List[str], meta_features: np.ndarray,
     else:
         raise ValueError(f"Неизвестный метод балансировки: {method}")
     
-    # Восстанавливаем тексты по индексам
+    # восстанавливаем данные по индексам
     texts_res = [texts[i[0]] for i in X_res_indices]
     
-    # Восстанавливаем meta_features по индексам
     meta_features_res = np.array([meta_features[i[0]] for i in X_res_indices])
     
-    # Проверяем тип y_res и преобразуем в список если нужно
     if isinstance(y_res, np.ndarray):
         y_res = y_res.tolist()
     
