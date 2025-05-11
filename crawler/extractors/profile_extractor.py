@@ -111,7 +111,7 @@ def extract_status(driver):
                 return status_text
 
     except Exception as e:
-        print(f"Не удалось получить статус пользователя: {e}")
+        pass
     
     return ""
 
@@ -150,7 +150,7 @@ def parse_count_text(count_text):
     if not count_text:
         return 0
     
-    clean_text = count_text.strip()
+    clean_text = count_text.replace(' ', '').strip()
     
     try:
         if 'M' in clean_text or 'М' in clean_text:
@@ -262,20 +262,17 @@ def open_details_modal(driver):
         if details_button:
             try:
                 details_button.click()
-                print("Кнопка 'Подробнее' нажата обычным кликом")
             except Exception as click_err:
                 print(f"Не удалось нажать обычным кликом: {click_err}")
                 
                 try:
                     driver.execute_script("arguments[0].click();", details_button)
-                    print("Кнопка 'Подробнее' нажата с помощью JavaScript")
                 except Exception as js_err:
                     print(f"Не удалось нажать с помощью JavaScript: {js_err}")
                     
                     try:
                         actions = ActionChains(driver)
                         actions.move_to_element(details_button).click().perform()
-                        print("Кнопка 'Подробнее' нажата с помощью ActionChains")
                     except Exception as action_err:
                         print(f"Не удалось нажать с помощью ActionChains: {action_err}")
                         return lambda: None
@@ -315,16 +312,13 @@ def open_details_modal(driver):
                             
                             try:
                                 close_button.click()
-                                print("Модальное окно закрыто обычным кликом")
                             except Exception:
                                 try:
                                     driver.execute_script("arguments[0].click();", close_button)
-                                    print("Модальное окно закрыто с помощью JavaScript")
                                 except Exception:
                                     try:
                                         actions = ActionChains(driver)
                                         actions.move_to_element(close_button).click().perform()
-                                        print("Модальное окно закрыто с помощью ActionChains")
                                     except Exception as e:
                                         print(f"Не удалось закрыть модальное окно: {e}")
                                         return False
@@ -656,11 +650,6 @@ def extract_people_main(driver):
     
     return 0
 
-def set_label():
-    # тут будем использовать нейронку для определения метки профиля
-    return 0
-
-
 def extract_profile_info(driver):
     """
     Извлекает основную информацию о профиле пользователя ВКонтакте
@@ -708,8 +697,6 @@ def extract_profile_info(driver):
         else:
             print("Не удалось открыть модальное окно, пробуем получить информацию с основной страницы...")
             
-        profile_data["label"] = set_label()
-        
         print(f"Собрана информация о профиле: {profile_data['name']} (id: {profile_data['user_id']})")
         return profile_data
         

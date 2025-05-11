@@ -109,7 +109,7 @@ def preprocess_user(user: dict) -> dict:
     lemmatized_text = lemmatize(filtered_text)
     
     return {
-        "label": user["label"],
+        "label": user.get("label", 0),
         "text": lemmatized_text,
         "meta": {
             "sex": user.get("sex", 0),

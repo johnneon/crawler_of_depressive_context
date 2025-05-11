@@ -43,7 +43,7 @@ def login_to_vk(driver, login, password):
             print("Кнопка входа найдена. Нажимаем...")
             submit_btn.click()
         except Exception as e:
-            print(f"Не удалось найти кнопку входа: {e}")
+            pass
         
         try:
             print("Ищем кнопку аутентификации...")
