@@ -1,351 +1,50 @@
-import json
-import time
-from selenium import webdriver
+import os
+import re
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import TimeoutException
-import os
+from crawler.extractors import extract_posts, extract_profile_info
+from crawler.auth import login_to_vk
+from crawler.utils import setup_driver, scroll_page, save_multiple_profiles, check_profile_availability
 
-DEFAULT_TARGET_USER = 'durov'
 DEFAULT_SCROLL_COUNT = 10
 DEFAULT_WAIT_TIME = 10 
-DEFAULT_OUTPUT_FILE = 'vk_posts.json'
+DEFAULT_OUTPUT_FILE = 'vk_data.json'
 
-def setup_driver():
-    options = webdriver.ChromeOptions()
-    options.add_argument('--start-maximized')
-    # опция для работы в headless режиме (без открытия окна браузера)
-    # options.add_argument('--headless')
-    
-    # отключаем запрос ключа доступа Windows
-    options.add_argument('--disable-webauthn-extension')
-    options.add_argument('--disable-extensions')
-    options.add_experimental_option('excludeSwitches', ['enable-automation'])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    
-    try:
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-        # обманываем сайт, что это не автоматизированный браузер
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        return driver
-    except Exception as e:
-        print(f"Ошибка при инициализации браузера: {e}")
-        raise
-
-def login_to_vk(driver, login, password):
-    try:
-        print("Открываем vk.com...")
-        driver.get("https://vk.com")
-        
-        wait = WebDriverWait(driver, DEFAULT_WAIT_TIME)
-        
-        print("Нажимаем на кнопку входа...")
-        enter_another_way_btn = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[data-testid='enter-another-way']")))
-        enter_another_way_btn.click()
-        
-        print("Вводим логин...")
-        phone_input = wait.until(EC.presence_of_element_located((By.NAME, "login")))
-        phone_input.clear()
-        phone_input.send_keys(login)
-        phone_input.send_keys(Keys.RETURN)
-        
-        print("Ожидаем перенаправления на id.vk.ru...")
-        wait.until(lambda d: "id.vk.ru" in d.current_url)
-        
-        time.sleep(2)
-        
-        # Предупреждение на случай если на акке есть 2FA
-        print("⚠️ ВНИМАНИЕ: Если появилось окно 'Безопасность Windows' с запросом ключа доступа - ОТМЕНИТЕ его!")
-        print("Нажмите 'Отмена' в диалоговом окне Windows и дождитесь продолжения скрипта.")
-        
-        # Даем время закрыть диалоговое окно
-        time.sleep(5)
-        print("Ожидаем появления элементов на новой странице...")
-        
-        try:
-            print("Ищем кнопку входа...")
-            submit_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-test-id='submit_btn']")))
-            print("Кнопка входа найдена. Нажимаем...")
-            submit_btn.click()
-        except Exception as e:
-            print(f"Не удалось найти кнопку входа: {e}")
-        
-        try:
-            print("Ищем кнопку аутентификации...")
-            anotherWayLoginBtn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-test-id='anotherWayLogin']")))
-            print("Кнопка аутентификации найдена. Нажимаем...")
-            anotherWayLoginBtn.click()
-        except Exception as e:
-            print(f"Не удалось найти кнопку аутентификации: {e}")
-            
-        time.sleep(1)
-            
-        try:
-            print("Ищем кнопку SMS аутентификации...")
-            verificationMethodSmsBtn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "[data-test-id='verificationMethod_sms']")))
-            print("Кнопка SMS аутентификации найдена. Нажимаем...")
-            verificationMethodSmsBtn.click()
-        except Exception as e:
-            print(f"Не удалось найти кнопку SMS аутентификации: {e}")
-        
-        print("Ожидаем отправки СМС кода...")
-        try:
-            wait.until(EC.presence_of_element_located((By.NAME, "otp-cell")))
-            
-            sms_code = input("Введите код из СМС (обычно 6 цифр): ")
-            sms_code = sms_code.strip()
-            otp_cells = driver.find_elements(By.NAME, "otp-cell")
-            
-            if len(otp_cells) < len(sms_code):
-                print(f"Внимание: Код содержит {len(sms_code)} цифр, но найдено только {len(otp_cells)} полей для ввода")
-                sms_code = sms_code[:len(otp_cells)]
-                
-            print("Вводим код из СМС...")
-            for i, digit in enumerate(sms_code):
-                if i < len(otp_cells):
-                    otp_cells[i].clear()
-                    otp_cells[i].send_keys(digit)
-                    time.sleep(0.2)
-                    
-            print("После ввода СМС-кода ожидаем поле для ввода пароля...")
-            try:
-                time.sleep(3)
-                
-                password_input = wait.until(EC.presence_of_element_located((By.NAME, "password")))
-                print("Найдено поле для ввода пароля. Вводим пароль...")
-                password_input.clear()
-                password_input.send_keys(password)
-                password_input.send_keys(Keys.RETURN)
-                print("Пароль отправлен")
-            except Exception as pass_e:
-                print(f"Не удалось найти поле для ввода пароля после СМС: {pass_e}")
-                print("Возможно, пароль не требуется или процесс авторизации изменился")
-                
-        except TimeoutException:
-            print("Поля для ввода SMS-кода не найдены. Возможно, используется другой метод аутентификации.")
-        except Exception as e:
-            print(f"Ошибка при вводе SMS-кода: {e}")
-        
-        print("Ожидаем завершения авторизации и редиректа на vk.ru/feed...")
-        auth_wait = WebDriverWait(driver, DEFAULT_WAIT_TIME * 2)
-        
-        try:
-            auth_wait.until(lambda driver: "vk.ru/feed" in driver.current_url)
-            print("Авторизация успешна! Перенаправлены на ленту новостей.")
-            return True
-        except TimeoutException:
-            print("Ожидание редиректа на vk.ru/feed превышено, проверяем другие признаки авторизации...")
-            try:
-                if "feed" in driver.current_url or "login" not in driver.current_url:
-                    print("URL указывает на авторизованное состояние.")
-                    return True
-                
-                if driver.find_elements(By.ID, "top_profile_link") or driver.find_elements(By.ID, "l_pr"):
-                    print("Обнаружены элементы авторизованного пользователя. Предполагаем, что авторизация успешна.")
-                    return True
-            except:
-                pass
-            
-            print("Не удалось подтвердить успешную авторизацию.")
-            return False
-    except TimeoutException as te:
-        print(f"Превышено время ожидания при авторизации: {te}")
-        return False
-    except Exception as e:
-        print(f"Ошибка при авторизации: {e}")
-        return False
-
-def scroll_page(driver, scroll_count=DEFAULT_SCROLL_COUNT):
-    try:
-        print(f"Прокручиваем страницу {scroll_count} раз...")
-        for i in range(scroll_count):
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
-            print(f"Прокрутка {i+1}/{scroll_count} выполнена")
-    except Exception as e:
-        print(f"Ошибка при прокрутке страницы: {e}")
-
-def extract_profile_info(driver):
+def extract_vk_user_id(url_or_id):
     """
-    Извлекает основную информацию о профиле пользователя ВКонтакте
+    Извлекает ID пользователя ВКонтакте из URL или строки ID
+    
+    Args:
+        url_or_id: URL профиля или ID пользователя
+        
+    Returns:
+        str: ID пользователя
+    """
+    if url_or_id.startswith('http'):
+        match = re.search(r'vk\.com/([^/?]+)', url_or_id)
+        if match:
+            return match.group(1)
+        return url_or_id
+    
+    return url_or_id
+
+def scrape_vk_user(driver, target_user, scroll_count=DEFAULT_SCROLL_COUNT):
+    """
+    Собирает данные профиля и постов отдельного пользователя
+    
+    Args:
+        driver: экземпляр Selenium WebDriver
+        target_user: ID пользователя или URL профиля
+        scroll_count: количество прокруток страницы
+        
+    Returns:
+        tuple: (profile_info, posts) или (None, None) в случае ошибки
     """
     try:
-        print("Получаем информацию о профиле...")
-        profile_data = {}
+        user_id = extract_vk_user_id(target_user)
         
-        try:
-            name_element = driver.find_element(By.CSS_SELECTOR, "h1[class*='page_name']")
-            if name_element:
-                profile_data["name"] = name_element.text.strip()
-        except Exception as e:
-            print(f"Не удалось получить имя пользователя: {e}")
-        
-        try:
-            current_url = driver.current_url
-            if "vk.com/" in current_url:
-                profile_id = current_url.split("vk.com/")[1].split("?")[0]
-                profile_data["user_id"] = profile_id
-        except Exception as e:
-            print(f"Не удалось получить ID пользователя: {e}")
-        
-        try:
-            status_element = driver.find_element(By.CSS_SELECTOR, "div[class*='profile_info'] span[class*='current_text']")
-            if status_element:
-                profile_data["status"] = status_element.text.strip()
-        except Exception as e:
-            pass  # У многих пользователей нет статуса
-        
-        try:
-            followers_element = driver.find_element(By.CSS_SELECTOR, 
-                                                 "a[href*='followers'] [class*='header_count']")
-            if followers_element:
-                followers_text = followers_element.text.strip().replace(" ", "").replace("K", "000")
-                profile_data["followers_count"] = int(followers_text) if followers_text.isdigit() else 0
-        except Exception as e:
-            pass  # У многих пользователей скрыта информация о подписчиках
-        
-        try:
-            info_blocks = driver.find_elements(By.CSS_SELECTOR, "div[class*='profile_info_block']")
-            for block in info_blocks:
-                block_title_element = block.find_element(By.CSS_SELECTOR, "[class*='profile_info_header']") if block.find_elements(By.CSS_SELECTOR, "[class*='profile_info_header']") else None
-                if not block_title_element:
-                    continue
-                
-                block_title = block_title_element.text.strip().lower()
-                
-                if "город" in block_title:
-                    city_element = block.find_element(By.CSS_SELECTOR, "a[class*='profile_info_link']")
-                    if city_element:
-                        profile_data["city"] = city_element.text.strip()
-                
-                elif "день рождения" in block_title:
-                    bday_element = block.find_element(By.CSS_SELECTOR, "[class*='profile_info_block_content']")
-                    if bday_element:
-                        profile_data["birthday"] = bday_element.text.strip()
-                
-                elif "образование" in block_title:
-                    edu_element = block.find_element(By.CSS_SELECTOR, "[class*='profile_info_block_content']")
-                    if edu_element:
-                        profile_data["education"] = edu_element.text.strip()
-        
-        except Exception as e:
-            print(f"Ошибка при получении дополнительной информации о профиле: {e}")
-        
-        print(f"Информация о профиле собрана: {profile_data}")
-        return profile_data
-        
-    except Exception as e:
-        print(f"Ошибка при извлечении информации о профиле: {e}")
-        return {}
-
-def extract_posts(driver):
-    try:
-        print("Извлекаем посты...")
-        wait = WebDriverWait(driver, DEFAULT_WAIT_TIME)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div._post")))
-        
-        post_elements = driver.find_elements(By.CSS_SELECTOR, "div._post")
-        print(f"Найдено постов: {len(post_elements)}")
-        
-        posts = []
-        for post in post_elements:
-            try:
-                post_data = {}
-                
-                post_id = post.get_attribute("data-post-id")
-                if post_id:
-                    post_data["post_id"] = post_id
-                
-                text_element = post.find_element(By.CSS_SELECTOR, "div[class*='vkitPostText__root']") if post.find_elements(By.CSS_SELECTOR, "div[class*='vkitPostText__root']") else None
-                if text_element:
-                    post_data["text"] = text_element.text.strip()
-                else:
-                    text_element = post.find_element(By.CSS_SELECTOR, "div.wall_post_text") if post.find_elements(By.CSS_SELECTOR, "div.wall_post_text") else None
-                    post_data["text"] = text_element.text.strip() if text_element else ""
-                
-                date_element = post.find_element(By.CSS_SELECTOR, "a[data-testid='post_date_block_preview']") if post.find_elements(By.CSS_SELECTOR, "a[data-testid='post_date_block_preview']") else None
-                if date_element:
-                    post_data["date_text"] = date_element.text.strip()
-                    post_data["date_href"] = date_element.get_attribute("href")
-                    # Можно извлечь timestamp из атрибута если нужно
-                
-                likes_element = post.find_element(By.CSS_SELECTOR, "div[class*='PostButtonReactions__title']") if post.find_elements(By.CSS_SELECTOR, "div[class*='PostButtonReactions__title']") else None
-                if likes_element:
-                    likes_text = likes_element.text.strip().replace(" ", "")
-                    post_data["likes"] = int(likes_text) if likes_text.isdigit() else 0
-                
-                reposts_element = post.find_element(By.CSS_SELECTOR, "div.PostBottomAction.share .PostBottomAction__count") if post.find_elements(By.CSS_SELECTOR, "div.PostBottomAction.share .PostBottomAction__count") else None
-                if reposts_element:
-                    reposts_text = reposts_element.text.strip().replace(" ", "")
-                    post_data["reposts"] = int(reposts_text) if reposts_text.isdigit() else 0
-                
-                comments_element = post.find_element(By.CSS_SELECTOR, "span[class*='comment_count']") if post.find_elements(By.CSS_SELECTOR, "span[class*='comment_count']") else None
-                if comments_element:
-                    comments_text = comments_element.text.strip().replace(" ", "")
-                    post_data["comments"] = int(comments_text) if comments_text.isdigit() else 0
-                else:
-                    post_data["comments"] = 0  # Если комментарии отключены или их нет
-                
-                views_element = post.find_element(By.CSS_SELECTOR, "div[class*='like_views']") if post.find_elements(By.CSS_SELECTOR, "div[class*='like_views']") else None
-                if views_element:
-                    views_text = views_element.text.strip().replace(" ", "").replace("K", "000")  # Обработка формата "1.2K"
-                    post_data["views"] = int(views_text) if views_text.isdigit() else 0
-                
-
-                posts.append(post_data)
-                print(f"Извлечены данные поста {post_id if post_id else 'без ID'}")
-            except Exception as e:
-                print(f"Ошибка при извлечении данных поста: {e}")
-                continue
-        
-        print(f"Успешно извлечено постов: {len(posts)}")
-        return posts
-    except TimeoutException:
-        print("Не удалось найти посты на странице")
-        return []
-    except Exception as e:
-        print(f"Ошибка при извлечении постов: {e}")
-        return []
-
-def save_posts(posts, filename=DEFAULT_OUTPUT_FILE):
-    try:
-        os.makedirs(os.path.dirname(os.path.abspath(filename)) or '.', exist_ok=True)
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(posts, f, ensure_ascii=False, indent=2)
-        
-        print(f"Готово! Посты сохранены в {filename}")
-        print(f"Всего сохранено постов: {len(posts)}")
-        
-        if posts:
-            likes_total = sum(post.get('likes', 0) for post in posts)
-            reposts_total = sum(post.get('reposts', 0) for post in posts)
-            comments_total = sum(post.get('comments', 0) for post in posts)
-            
-            print(f"Общая статистика:")
-            print(f"- Всего лайков: {likes_total}")
-            print(f"- Всего репостов: {reposts_total}")
-            print(f"- Всего комментариев: {comments_total}")
-        
-        return True
-    except Exception as e:
-        print(f"Ошибка при сохранении постов: {e}")
-        return False
-
-def scrape_vk_posts(login, password, target_user=DEFAULT_TARGET_USER, scroll_count=DEFAULT_SCROLL_COUNT, output_file=DEFAULT_OUTPUT_FILE):
-    driver = None
-    try:
-        driver = setup_driver()
-        
-        if not login_to_vk(driver, login, password):
-            return False
-        
-        profile_url = f"https://vk.com/{target_user}"
+        profile_url = f"https://vk.com/{user_id}"
         print(f"Переходим на {profile_url}...")
         driver.get(profile_url)
         
@@ -353,35 +52,8 @@ def scrape_vk_posts(login, password, target_user=DEFAULT_TARGET_USER, scroll_cou
             EC.presence_of_element_located((By.CSS_SELECTOR, "body"))
         )
         
-        try:
-            private_elements = driver.find_elements(By.XPATH, 
-                "//h3[contains(text(), 'Страница пользователя заблокирована') or contains(text(), 'Страница доступна только авторизованным пользователям')]")
-            
-            closed_profile_elements = driver.find_elements(By.CSS_SELECTOR, 
-                "h3[class*='ClosedProfileBlock__title']")
-            
-            closed_title_elements = driver.find_elements(By.XPATH,
-                "//h3[contains(@class, 'ClosedProfileBlock__title')]")
-            
-            wall_container = driver.find_elements(By.CSS_SELECTOR, "#page_wall_posts")
-            
-            if private_elements or closed_profile_elements or closed_title_elements or (len(wall_container) == 0):
-                print(f"Ошибка: Профиль пользователя {target_user} закрыт или не существует.")
-                print("Невозможно получить доступ к постам этого пользователя.")
-                
-                if closed_profile_elements:
-                    print(f"Обнаружен элемент закрытого профиля по классу: {len(closed_profile_elements)}")
-                if closed_title_elements:
-                    print(f"Обнаружен заголовок 'Это закрытый профиль': {len(closed_title_elements)}")
-                if private_elements:
-                    print(f"Обнаружено сообщение о закрытой странице: {len(private_elements)}")
-                if len(wall_container) == 0:
-                    print("Стена с постами отсутствует")
-                    
-                return False
-                
-        except Exception as e:
-            print(f"Ошибка при проверке доступности профиля: {e}")
+        if not check_profile_availability(driver, user_id):
+            return None, None
         
         print("Извлекаем информацию о профиле...")
         profile_info = extract_profile_info(driver)
@@ -391,14 +63,101 @@ def scrape_vk_posts(login, password, target_user=DEFAULT_TARGET_USER, scroll_cou
         posts = extract_posts(driver)
         
         if not posts:
-            print(f"Не найдено постов на странице пользователя {target_user}.")
+            print(f"Не найдено постов на странице пользователя {user_id}.")
             print("Возможно, профиль закрыт или не содержит публичных постов.")
+            return profile_info, []
+        
+        return profile_info, posts
+            
+    except Exception as e:
+        print(f"Ошибка при сборе данных пользователя {target_user}: {e}")
+        return None, None
+
+def parse_users_list(users_string):
+    """
+    Парсит строку с ID пользователей или URL профилей, разделенных запятыми
+    
+    Args:
+        users_string: строка с ID пользователей или URL профилей
+        
+    Returns:
+        list: список ID пользователей или URL профилей
+    """
+    if not users_string:
+        return []
+        
+    users = [user.strip() for user in users_string.split(',') if user.strip()]
+    print(f"Получен список из {len(users)} пользователей из командной строки")
+    return users
+
+def load_users_list(file_path):
+    """
+    Загружает список пользователей из текстового файла
+    Поддерживает как ID пользователей, так и URL профилей
+    
+    Args:
+        file_path: путь к файлу со списком пользователей
+        
+    Returns:
+        list: список ID пользователей или URL профилей
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            users = [line.strip() for line in f if line.strip()]
+        print(f"Загружен список из {len(users)} пользователей из файла {file_path}")
+        return users
+    except Exception as e:
+        print(f"Ошибка при загрузке списка пользователей: {e}")
+        return []
+
+def scrape_vk_posts(login, password, target_users, scroll_count=DEFAULT_SCROLL_COUNT, output_file=DEFAULT_OUTPUT_FILE, visible=False):
+    """
+    Собирает данные профилей и постов для списка пользователей
+    
+    Args:
+        login: логин ВКонтакте
+        password: пароль ВКонтакте
+        target_users: список ID пользователей или URL профилей
+        scroll_count: количество прокруток страницы
+        output_file: путь к файлу для сохранения всех данных
+        visible: запуск браузера с видимым GUI (по умолчанию: False - headless режим)
+        
+    Returns:
+        bool: True если хотя бы один профиль был успешно обработан, False в случае ошибки
+    """
+    driver = None
+    success_count = 0
+    all_profiles = []
+    
+    try:
+        driver = setup_driver(visible=visible)
+        
+        if not login_to_vk(driver, login, password):
             return False
         
-        for post in posts:
-            post['profile_info'] = profile_info
+        output_dir = os.path.dirname(output_file)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        
+        for idx, user in enumerate(target_users):
+            print(f"\n[{idx+1}/{len(target_users)}] Обрабатываем пользователя: {user}")
             
-        return save_posts(posts, output_file)
+            profile_info, posts = scrape_vk_user(driver, user, scroll_count)
+            
+            if profile_info is not None:
+                profile_data = profile_info.copy()
+                profile_data["posts"] = posts
+                
+                all_profiles.append(profile_data)
+                success_count += 1
+                print(f"Данные пользователя {user} успешно получены")
+        
+        if all_profiles:
+            if save_multiple_profiles(all_profiles, output_file):
+                print(f"\nВсе данные успешно сохранены в файл {output_file}")
+        
+        print(f"\nОбработка завершена. Успешно обработано профилей: {success_count}/{len(target_users)}")
+        return success_count > 0
     
     except Exception as e:
         print(f"Произошла непредвиденная ошибка: {e}")
@@ -416,18 +175,33 @@ if __name__ == "__main__":
                        help='Логин пользователя VK')
     parser.add_argument('--password', type=str, required=True,
                        help='Пароль пользователя VK')
-    parser.add_argument('--user', type=str, default=DEFAULT_TARGET_USER, 
-                        help=f'ID пользователя (по умолчанию: {DEFAULT_TARGET_USER})')
+    parser.add_argument('--users', type=str,
+                        help='Список ID пользователей или URL профилей через запятую (например: durov,https://vk.com/id1)')
+    parser.add_argument('--users-file', type=str,
+                        help='Путь к файлу со списком ID пользователей или URL профилей (по одному на строку)')
     parser.add_argument('--scrolls', type=int, default=DEFAULT_SCROLL_COUNT, 
-                        help=f'Количество прокруток (по умолчанию: {DEFAULT_SCROLL_COUNT})')
-    parser.add_argument('--output', type=str, default=DEFAULT_OUTPUT_FILE, 
-                        help=f'Путь к выходному файлу (по умолчанию: {DEFAULT_OUTPUT_FILE})')
+                        help=f'Количество прокруток страницы (по умолчанию: {DEFAULT_SCROLL_COUNT})')
+    parser.add_argument('--output', type=str, default=DEFAULT_OUTPUT_FILE,
+                        help=f'Путь к файлу для сохранения данных (по умолчанию: {DEFAULT_OUTPUT_FILE})')
+    parser.add_argument('--visible', action='store_true',
+                        help='Запуск браузера с видимым GUI (по умолчанию: False - headless режим)')
     
     args = parser.parse_args()
     
-    success = scrape_vk_posts(args.login, args.password, args.user, args.scrolls, args.output)
+    target_users = []
+    if args.users_file:
+        target_users = load_users_list(args.users_file)
+    elif args.users:
+        target_users = parse_users_list(args.users)
+    
+    if not target_users:
+        print("Не указаны пользователи для обработки. Необходимо указать --users или --users-file.")
+        print("Пример: --users durov,https://vk.com/id1")
+        exit(1)
+    
+    success = scrape_vk_posts(args.login, args.password, target_users, args.scrolls, args.output, args.visible)
     
     if success:
-        print("Скрапинг завершен успешно!")
+        print("Краулинг завершен успешно!")
     else:
-        print("Скрапинг завершен с ошибками.")
+        print("Краулинг завершен с ошибками.")
