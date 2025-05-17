@@ -13,6 +13,7 @@ def init_session_state():
         st.session_state.visible_browser = False
         st.session_state.predict_depression = True
         st.session_state.users_temp_file = None
+        st.session_state.skip_auth = False
 
 def reset_app():
     """Сброс состояния приложения к начальным значениям"""
@@ -26,7 +27,8 @@ def reset_app():
     st.session_state.visible_browser = False
     st.session_state.predict_depression = True
     st.session_state.users_temp_file = None
-    st.rerun()
+    st.session_state.skip_auth = False
+    st.experimental_rerun()
 
 def go_to_step_2():
     """Проверка и переход ко второму шагу"""
@@ -39,8 +41,8 @@ def go_to_step_2():
 
 def go_to_step_3():
     """Проверка и переход к третьему шагу"""
-    if not st.session_state.login or not st.session_state.password:
-        st.error("Необходимо ввести логин и пароль ВКонтакте")
+    if not st.session_state.skip_auth and (not st.session_state.login or not st.session_state.password):
+        st.error("Необходимо ввести логин и пароль ВКонтакте или выбрать опцию 'Пропустить авторизацию'")
     else:
         st.session_state.step = 3
 

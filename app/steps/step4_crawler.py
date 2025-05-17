@@ -8,14 +8,19 @@ def step4_crawling():
     st.subheader("Запуск краулинга")
     
     try:
+        # Создаем плейсхолдер для вывода
+        output_area = st.empty()
+        
+        # Запускаем краулер
+        st.info("Запускаем краулер.")
         command, output_file = prepare_crawler_command()
         returncode = run_crawler(command)
         
         if returncode == 0 and os.path.exists(output_file):
-            st.success("Краулинг успешно завершен!")
+            st.success("Краулинг через subprocess успешно завершен!")
             display_results(output_file)
         else:
-            st.error("Произошла ошибка при выполнении краулинга.")
+            st.error("Не удалось запустить краулер ни одним из способов.")
     
     except Exception as e:
         st.error(f"Ошибка при запуске краулера: {e}")
