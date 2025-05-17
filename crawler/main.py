@@ -1,10 +1,16 @@
-import os
+﻿import os
 import re
 import sys
 from pathlib import Path
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+
+# Настраиваем кодировку для корректного вывода русского текста
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 from crawler.extractors import extract_posts, extract_profile_info
 from crawler.auth import login_to_vk
 from crawler.utils import setup_driver, scroll_page, save_multiple_profiles, check_profile_availability
@@ -97,6 +103,16 @@ def parse_users_list(users_string):
     """
     if not users_string:
         return []
+    
+    # Проверяем, что строка в правильной кодировке
+    if isinstance(users_string, bytes):
+        try:
+            users_string = users_string.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                users_string = users_string.decode('cp1251')
+            except:
+                pass
         
     users = [user.strip() for user in users_string.split(',') if user.strip()]
     print(f"Получен список из {len(users)} пользователей из командной строки")
@@ -125,7 +141,7 @@ def load_users_list(file_path):
 def scrape_vk_posts(login, password, target_users, scroll_count=DEFAULT_SCROLL_COUNT, 
                    output_file=DEFAULT_OUTPUT_FILE, visible=False, 
                    predict_depression_flag=False, model_path=DEFAULT_MODEL_PATH, 
-                   fasttext_path=DEFAULT_FASTTEXT_PATH):
+                   fasttext_path=DEFAULT_FASTTEXT_PATH, skip_auth=False):
     """
     Собирает данные профилей и постов для списка пользователей
     
@@ -139,6 +155,7 @@ def scrape_vk_posts(login, password, target_users, scroll_count=DEFAULT_SCROLL_C
         predict_depression_flag: флаг для предсказания депрессии
         model_path: путь к модели для предсказания депрессии
         fasttext_path: путь к модели FastText
+        skip_auth: пропускать авторизацию (для доступа только к публичным профилям)
         
     Returns:
         bool: True если хотя бы один профиль был успешно обработан, False в случае ошибки
@@ -150,15 +167,18 @@ def scrape_vk_posts(login, password, target_users, scroll_count=DEFAULT_SCROLL_C
     try:
         driver = setup_driver(visible=visible)
         
-        if not login_to_vk(driver, login, password):
-            return False
+        if not skip_auth:
+            if not login_to_vk(driver, login, password):
+                return False
+        else:
+            print("Авторизация пропущена. Доступ только к публичным профилям.")
         
         output_dir = os.path.dirname(output_file)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
 
         predictor = None
-        if not depression_prediction_available:
+        if predict_depression_flag and depression_prediction_available:
             predictor = DepressionPredictor(
                 model_path=model_path,
                 fasttext_path=fasttext_path
@@ -202,10 +222,12 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Скрипт для сбора постов с ВКонтакте')
-    parser.add_argument('--login', type=str, required=True,
+    parser.add_argument('--login', type=str, 
                        help='Логин пользователя VK')
-    parser.add_argument('--password', type=str, required=True,
+    parser.add_argument('--password', type=str,
                        help='Пароль пользователя VK')
+    parser.add_argument('--skip-auth', action='store_true',
+                       help='Пропустить авторизацию (доступ только к публичным профилям)')
     parser.add_argument('--users', type=str,
                         help='Список ID пользователей или URL профилей через запятую (например: durov,https://vk.com/id1)')
     parser.add_argument('--users-file', type=str,
@@ -225,6 +247,13 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # Проверяем наличие данных авторизации, если не указан skip-auth
+    if not args.skip_auth and (not args.login or not args.password):
+        print("Ошибка: Не указаны данные для авторизации.")
+        print("Необходимо указать --login и --password или использовать --skip-auth.")
+        print("Пример: --login example@mail.ru --password your_password")
+        exit(1)
+    
     target_users = []
     if args.users_file:
         target_users = load_users_list(args.users_file)
@@ -235,7 +264,7 @@ if __name__ == "__main__":
         print("Не указаны пользователи для обработки. Необходимо указать --users или --users-file.")
         print("Пример: --users durov,https://vk.com/id1")
         exit(1)
-    
+
     success = scrape_vk_posts(
         args.login, 
         args.password, 
@@ -245,10 +274,14 @@ if __name__ == "__main__":
         args.visible,
         args.predict_depression,
         args.model_path,
-        args.fasttext_path
+        args.fasttext_path,
+        args.skip_auth
     )
     
-    if success:
-        print("Краулинг завершен успешно!")
+    if not success:
+        print("\nНе удалось получить данные профилей. Проверьте параметры и повторите попытку.")
+        exit(1)
     else:
-        print("Краулинг завершен с ошибками.")
+        print("\nРабота скрипта успешно завершена.")
+        exit(0)
+

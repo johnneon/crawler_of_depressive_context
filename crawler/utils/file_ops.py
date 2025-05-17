@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 
 DEFAULT_OUTPUT_FILE = 'vk_data.json'
