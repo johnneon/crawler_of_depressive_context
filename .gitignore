@@ -112,3 +112,7 @@ cc.ru.300.vec.gz
 cc.ru.300.bin
 fasttext-0.9.2-cp311-cp311-win_amd64.whl
 vk_data.json
+app/temp
+6_results.png
+7_results.png
+test_data.txt

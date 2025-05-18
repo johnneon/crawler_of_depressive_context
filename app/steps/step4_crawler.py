@@ -7,26 +7,32 @@ def step4_crawling():
     """Компонент для четвертого шага - запуск краулинга и отображение результатов"""
     st.subheader("Запуск краулинга")
     
+    status_area = st.empty()
+    progress_area = st.empty()
+    
     try:
-        # Создаем плейсхолдер для вывода
-        output_area = st.empty()
-        
-        # Запускаем краулер
-        st.info("Запускаем краулер.")
+        status_area.info("Подготовка к запуску...")
         command, output_file = prepare_crawler_command()
+        
+        status_area.empty()
+        
         returncode = run_crawler(command)
         
         if returncode == 0 and os.path.exists(output_file):
-            st.success("Краулинг через subprocess успешно завершен!")
+            progress_area.empty()
             display_results(output_file)
         else:
-            st.error("Не удалось запустить краулер ни одним из способов.")
+            status_area.error("❌ Не удалось запустить краулер. Проверьте параметры и повторите попытку.")
     
     except Exception as e:
-        st.error(f"Ошибка при запуске краулера: {e}")
+        status_area.error(f"❌ Ошибка при запуске краулера: {e}")
     
     finally:
-        if st.session_state.users_temp_file and os.path.exists(st.session_state.users_temp_file):
-            os.unlink(st.session_state.users_temp_file)
+        if hasattr(st.session_state, 'users_temp_file') and st.session_state.users_temp_file and os.path.exists(st.session_state.users_temp_file):
+            try:
+                os.unlink(st.session_state.users_temp_file)
+            except Exception as e:
+                print(f"Ошибка при удалении временного файла: {e}")
     
+    # Кнопка для начала заново
     st.button("Начать заново", on_click=reset_app) 
